@@ -1,6 +1,8 @@
 local strings = require("vfox.strings")
+local foojay = require("foojay")
 
-local short_name = {
+-- static aliases kept as fallback for common short names
+local static_aliases = {
     ["open"] = "openjdk",
     ["bsg"] = "bisheng",
     ["amzn"] = "corretto",
@@ -21,36 +23,88 @@ local short_name = {
     ["jb"] = "jetbrains",
 }
 
-local long_name={}
-local distribution_version={
-    distributions={}
-}
+local short_name = {}
+local long_name = {}
+local distribution_version = { distributions = {} }
 
-for k,v in pairs(short_name) do
-    long_name[v]=k
-    table.insert(distribution_version.distributions,{
-        name = v,
-        short_name = k
-    })
+-- Build mappings by combining static aliases and dynamic data from foojay
+local function build_mappings()
+    -- start with static aliases
+    for k, v in pairs(static_aliases) do
+        short_name[k] = v
+        long_name[v] = long_name[v] or k
+    end
+
+    -- fetch distributions from foojay and merge synonyms
+    local ok, dists = pcall(foojay.get_distributions)
+    if ok and dists then
+        for _, dist in ipairs(dists) do
+            local api_param = dist.api_parameter
+            if api_param then
+                -- ensure long_name has at least api_param as short alias
+                long_name[api_param] = long_name[api_param] or api_param
+                -- map api_parameter itself as a valid short_name (normalized)
+                short_name[string.lower(api_param)] = api_param
+                -- map synonyms to api_parameter
+                if dist.synonyms then
+                    for _, s in ipairs(dist.synonyms) do
+                        if s and type(s) == "string" then
+                            short_name[string.lower(s)] = api_param
+                        end
+                    end
+                end
+                -- add to distributions list (used by Available)
+                table.insert(distribution_version.distributions, {
+                    name = api_param,
+                    short_name = api_param,
+                })
+            end
+        end
+    else
+        -- fallback: if call failed, populate distributions from static aliases
+        for k, v in pairs(static_aliases) do
+            table.insert(distribution_version.distributions, {
+                name = v,
+                short_name = k,
+            })
+        end
+    end
 end
 
+build_mappings()
+
 function distribution_version.parse_distribution (name)
-    local distribution_name=long_name[name]
-    if distribution_name then
-        -- already a valid long name, just return it
+    if not name or type(name) ~= "string" then
+        return nil
+    end
+    -- normalize input to support varied user input (case-insensitive)
+    local name_l = string.lower(name)
+
+    -- first check if input matches a known long name (api_parameter)
+    if long_name[name_l] then
+        return {
+            name = name_l,
+            short_name = long_name[name_l]
+        }
+    end
+
+    -- check short_name aliases (including synonyms)
+    local mapped = short_name[name_l]
+    if mapped then
+        return {
+            name = mapped,
+            short_name = name_l
+        }
+    end
+
+    -- as last resort, check if the input as-is matches a long name
+    if long_name[name] then
         return {
             name = name,
-            short_name = distribution_name
+            short_name = long_name[name]
         }
     end
-    distribution_name=short_name[name]
-    if distribution_name then
-        -- already a valid short name, just return it
-        return {
-            name = distribution_name,
-            short_name = name
-        }
-    end
+
     return nil
 end
 

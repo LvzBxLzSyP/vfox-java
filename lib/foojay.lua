@@ -6,6 +6,29 @@ local foojay = {}
 local URL =
 "https://api.foojay.io/disco/v3.0/packages/jdks?version=%s&distribution=%s&architecture=%s&archive_type=%s&operating_system=%s&lib_c_type=%s&directly_downloadable=true"
 
+local DISTRI_URL = "https://api.foojay.io/disco/v3.0/distributions"
+
+local cached_distributions = nil
+
+-- Fetch list of distributions from Foojay (cached)
+foojay.get_distributions = function ()
+    if cached_distributions ~= nil then
+        return cached_distributions
+    end
+
+    local resp, err = http.get({ url = DISTRI_URL })
+    if err ~= nil then
+        error("Failed to fetch distributions from foojay: " .. err)
+    end
+    if resp.status_code ~= 200 then
+        error("Failed to fetch distributions from foojay: status_code =>" .. resp.status_code)
+    end
+
+    local respBody = json.decode(resp.body)
+    cached_distributions = respBody.result or {}
+    return cached_distributions
+end
+
 --- Detects the libc type on Linux systems (glibc or musl)
 --- @return string "glibc" or "musl"
 local function detect_lib_c_type()
